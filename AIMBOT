@@ -1,215 +1,506 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
 
-local lp = Players.LocalPlayer
-local PASS = "SILE_095684f"
-local unlocked = false
-local locking = false
-local maxDist = 250
-local aimPartName = "Head"
-local conn = nil
-local lastTap = 0
-local lastPos = Vector2.zero
+local LocalPlayer = Players.LocalPlayer
+local CORRECT_PASS = "SILE_095684f"
 
-local function getCam()
-	return workspace.CurrentCamera
+local State = {
+	Unlocked = false,
+	LockEnabled = false,
+	MaxDistance = 250,
+	AimPartName = "Head", -- "Head" hoặc "HumanoidRootPart"
+	Smoothness = 0.28,
+	CurrentTarget = nil,
+	LockConn = nil,
+	LastTapTime = 0,
+	LastTapPos = Vector2.zero
+}
+
+--------------------------------------------------------------------------------
+-- GIAO DIỆN FROSTED LIQUID GLASS
+--------------------------------------------------------------------------------
+local function applyGlass(instance, radius, strokeThick, bgTrans, baseCol)
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, radius or 14)
+	corner.Parent = instance
+
+	instance.BackgroundColor3 = baseCol or Color3.fromRGB(30, 33, 42)
+	instance.BackgroundTransparency = bgTrans or 0.22
+
+	local grad = Instance.new("UIGradient")
+	grad.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+		ColorSequenceKeypoint.new(0.5, Color3.fromRGB(225, 230, 242)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 110, 135))
+	})
+	grad.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.14),
+		NumberSequenceKeypoint.new(0.5, 0.26),
+		NumberSequenceKeypoint.new(1, 0.18)
+	})
+	grad.Rotation = 35
+	grad.Parent = instance
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Thickness = strokeThick or 2
+	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	stroke.Color = Color3.fromRGB(255, 255, 255)
+	stroke.Transparency = 0.2
+	stroke.Parent = instance
+
+	local sGrad = Instance.new("UIGradient")
+	sGrad.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+		ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 65, 95)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 210, 220))
+	})
+	sGrad.Rotation = 120
+	sGrad.Parent = stroke
+
+	return stroke
 end
 
-local function getPart(char)
+if CoreGui:FindFirstChild("SileLockOnGui") then
+	CoreGui.SileLockOnGui:Destroy()
+end
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "SileLockOnGui"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.Parent = CoreGui
+
+-- Chỉ báo mục tiêu trên màn hình
+local TargetReticle = Instance.new("Frame")
+TargetReticle.Name = "TargetReticle"
+TargetReticle.Size = UDim2.new(0, 46, 0, 46)
+TargetReticle.AnchorPoint = Vector2.new(0.5, 0.5)
+TargetReticle.BackgroundTransparency = 1
+TargetReticle.Visible = false
+TargetReticle.ZIndex = 5
+TargetReticle.Parent = ScreenGui
+
+local reticleStroke = Instance.new("UIStroke")
+reticleStroke.Color = Color3.fromRGB(255, 50, 80)
+reticleStroke.Thickness = 2.4
+reticleStroke.Parent = TargetReticle
+Instance.new("UICorner", TargetReticle).CornerRadius = UDim.new(1, 0)
+
+local TargetTag = Instance.new("TextLabel")
+TargetTag.Size = UDim2.new(0, 156, 0, 22)
+TargetTag.Position = UDim2.new(0.5, -78, 0, -26)
+TargetTag.BackgroundColor3 = Color3.fromRGB(24, 27, 36)
+TargetTag.BackgroundTransparency = 0.25
+TargetTag.TextColor3 = Color3.fromRGB(255, 255, 255)
+TargetTag.Font = Enum.Font.GothamBold
+TargetTag.TextSize = 11
+TargetTag.Text = ""
+TargetTag.Parent = TargetReticle
+Instance.new("UICorner", TargetTag).CornerRadius = UDim.new(0, 6)
+
+--------------------------------------------------------------------------------
+-- MÀN HÌNH NHẬP MẬT KHẨU (FROSTED LIQUID GLASS)
+--------------------------------------------------------------------------------
+local LockBackdrop = Instance.new("Frame")
+LockBackdrop.Name = "LockBackdrop"
+LockBackdrop.Size = UDim2.new(1, 0, 1, 0)
+LockBackdrop.BackgroundColor3 = Color3.fromRGB(8, 10, 16)
+LockBackdrop.BackgroundTransparency = 0.45
+LockBackdrop.BorderSizePixel = 0
+LockBackdrop.ZIndex = 30
+LockBackdrop.Parent = ScreenGui
+
+local AuthCard = Instance.new("Frame")
+AuthCard.Name = "AuthCard"
+AuthCard.Size = UDim2.new(0, 340, 0, 224)
+AuthCard.Position = UDim2.new(0.5, -170, 0.5, -112)
+AuthCard.ZIndex = 31
+AuthCard.Parent = LockBackdrop
+local authStroke = applyGlass(AuthCard, 20, 2.4, 0.18, Color3.fromRGB(28, 31, 42))
+
+local AuthBadge = Instance.new("TextLabel")
+AuthBadge.Size = UDim2.new(0, 108, 0, 22)
+AuthBadge.Position = UDim2.new(0.5, -54, 0, 14)
+AuthBadge.Text = "★ SILE ACCESS"
+AuthBadge.TextColor3 = Color3.fromRGB(255, 255, 255)
+AuthBadge.Font = Enum.Font.GothamBlack
+AuthBadge.TextSize = 10
+AuthBadge.ZIndex = 32
+AuthBadge.Parent = AuthCard
+applyGlass(AuthBadge, 11, 1.3, 0.25, Color3.fromRGB(72, 28, 42))
+
+local AuthTitle = Instance.new("TextLabel")
+AuthTitle.Size = UDim2.new(1, -28, 0, 30)
+AuthTitle.Position = UDim2.new(0, 14, 0, 42)
+AuthTitle.BackgroundTransparency = 1
+AuthTitle.Text = "NHẬP MẬT KHẨU LOCK-ON"
+AuthTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+AuthTitle.Font = Enum.Font.GothamBlack
+AuthTitle.TextSize = 16
+AuthTitle.ZIndex = 32
+AuthTitle.Parent = AuthCard
+
+local AuthSub = Instance.new("TextLabel")
+AuthSub.Size = UDim2.new(1, -28, 0, 20)
+AuthSub.Position = UDim2.new(0, 14, 0, 70)
+AuthSub.BackgroundTransparency = 1
+AuthSub.Text = "Xác thực để mở khóa bảng điều khiển"
+AuthSub.TextColor3 = Color3.fromRGB(205, 212, 228)
+AuthSub.Font = Enum.Font.GothamBold
+AuthSub.TextSize = 11
+AuthSub.ZIndex = 32
+AuthSub.Parent = AuthCard
+
+local PassBox = Instance.new("TextBox")
+PassBox.Size = UDim2.new(1, -36, 0, 42)
+PassBox.Position = UDim2.new(0, 18, 0, 98)
+PassBox.BackgroundColor3 = Color3.fromRGB(42, 46, 58)
+PassBox.BackgroundTransparency = 0.14
+PassBox.PlaceholderText = "Nhập mật khẩu tại đây..."
+PassBox.PlaceholderColor3 = Color3.fromRGB(160, 166, 182)
+PassBox.Text = ""
+PassBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+PassBox.Font = Enum.Font.GothamBold
+PassBox.TextSize = 13
+PassBox.ClearTextOnFocus = false
+PassBox.ZIndex = 32
+PassBox.Parent = AuthCard
+local passCorner = Instance.new("UICorner")
+passCorner.CornerRadius = UDim.new(0, 11)
+passCorner.Parent = PassBox
+local passStroke = Instance.new("UIStroke")
+passStroke.Color = Color3.fromRGB(255, 70, 100)
+passStroke.Thickness = 1.6
+passStroke.Transparency = 0.25
+passStroke.Parent = PassBox
+
+local UnlockBtn = Instance.new("TextButton")
+UnlockBtn.Size = UDim2.new(1, -36, 0, 40)
+UnlockBtn.Position = UDim2.new(0, 18, 0, 150)
+UnlockBtn.Text = "MỞ KHÓA"
+UnlockBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+UnlockBtn.Font = Enum.Font.GothamBlack
+UnlockBtn.TextSize = 13
+UnlockBtn.AutoButtonColor = false
+UnlockBtn.ZIndex = 32
+UnlockBtn.Parent = AuthCard
+applyGlass(UnlockBtn, 11, 1.8, 0.12, Color3.fromRGB(115, 28, 48))
+
+local AuthStatus = Instance.new("TextLabel")
+AuthStatus.Size = UDim2.new(1, -28, 0, 18)
+AuthStatus.Position = UDim2.new(0, 14, 1, -22)
+AuthStatus.BackgroundTransparency = 1
+AuthStatus.Text = ""
+AuthStatus.TextColor3 = Color3.fromRGB(255, 95, 120)
+AuthStatus.Font = Enum.Font.GothamBold
+AuthStatus.TextSize = 11
+AuthStatus.ZIndex = 32
+AuthStatus.Parent = AuthCard
+
+--------------------------------------------------------------------------------
+-- KHUNG ĐIỀU KHIỂN LOCK-ON (NHẤN E BẬT / TẮT | CTRL HOẶC 2 CHẠM ĐỂ ẨN/HIỆN)
+--------------------------------------------------------------------------------
+local Panel = Instance.new("Frame")
+Panel.Size = UDim2.new(0, 290, 0, 212)
+Panel.Position = UDim2.new(0.5, -145, 0.5, -106)
+Panel.Active = true
+Panel.Draggable = true
+Panel.Visible = false
+Panel.ZIndex = 15
+Panel.Parent = ScreenGui
+applyGlass(Panel, 18, 2.2, 0.22, Color3.fromRGB(28, 31, 40))
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -24, 0, 34)
+Title.Position = UDim2.new(0, 14, 0, 6)
+Title.BackgroundTransparency = 1
+Title.Text = "SILE LOCK-ON [PHÍM E]"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.Font = Enum.Font.GothamBlack
+Title.TextSize = 15
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.ZIndex = 16
+Title.Parent = Panel
+
+local ToggleBtn = Instance.new("TextButton")
+ToggleBtn.Size = UDim2.new(1, -28, 0, 42)
+ToggleBtn.Position = UDim2.new(0, 14, 0, 46)
+ToggleBtn.Text = "LOCK-ON: OFF [NHẤN E]"
+ToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleBtn.Font = Enum.Font.GothamBold
+ToggleBtn.TextSize = 12
+ToggleBtn.AutoButtonColor = false
+ToggleBtn.ZIndex = 16
+ToggleBtn.Parent = Panel
+local toggleStroke = applyGlass(ToggleBtn, 12, 1.8, 0.25, Color3.fromRGB(45, 48, 60))
+
+local PartBtn = Instance.new("TextButton")
+PartBtn.Size = UDim2.new(0, 127, 0, 36)
+PartBtn.Position = UDim2.new(0, 14, 0, 98)
+PartBtn.Text = "MỤC TIÊU: HEAD"
+PartBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+PartBtn.Font = Enum.Font.GothamBold
+PartBtn.TextSize = 11
+PartBtn.AutoButtonColor = false
+PartBtn.ZIndex = 16
+PartBtn.Parent = Panel
+applyGlass(PartBtn, 10, 1.5, 0.28, Color3.fromRGB(36, 40, 52))
+
+local DistBox = Instance.new("TextBox")
+DistBox.Size = UDim2.new(0, 127, 0, 36)
+DistBox.Position = UDim2.new(1, -141, 0, 98)
+DistBox.Text = "Tầm: " .. tostring(State.MaxDistance)
+DistBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+DistBox.Font = Enum.Font.GothamBold
+DistBox.TextSize = 11
+DistBox.ZIndex = 16
+DistBox.Parent = Panel
+applyGlass(DistBox, 10, 1.5, 0.28, Color3.fromRGB(36, 40, 52))
+
+local StatusLbl = Instance.new("TextLabel")
+StatusLbl.Size = UDim2.new(1, -28, 0, 20)
+StatusLbl.Position = UDim2.new(0, 14, 0, 144)
+StatusLbl.BackgroundTransparency = 1
+StatusLbl.Text = "Nhấn E để bật / tắt khóa mục tiêu"
+StatusLbl.TextColor3 = Color3.fromRGB(215, 220, 235)
+StatusLbl.Font = Enum.Font.GothamBold
+StatusLbl.TextSize = 11
+StatusLbl.TextXAlignment = Enum.TextXAlignment.Left
+StatusLbl.ZIndex = 16
+StatusLbl.Parent = Panel
+
+local HintLbl = Instance.new("TextLabel")
+HintLbl.Size = UDim2.new(1, -28, 0, 32)
+HintLbl.Position = UDim2.new(0, 14, 0, 168)
+HintLbl.BackgroundTransparency = 1
+HintLbl.Text = "PC: Nhấn Ctrl ẩn/hiện | Mobile: Chạm 2 lần màn hình"
+HintLbl.TextColor3 = Color3.fromRGB(168, 176, 196)
+HintLbl.Font = Enum.Font.Gotham
+HintLbl.TextSize = 10
+HintLbl.TextWrapped = true
+HintLbl.TextXAlignment = Enum.TextXAlignment.Left
+HintLbl.ZIndex = 16
+HintLbl.Parent = Panel
+
+--------------------------------------------------------------------------------
+-- LOGIC TÌM & KHÓA MỤC TIÊU
+--------------------------------------------------------------------------------
+local function getAimPart(char)
 	if not char then return nil end
-	return char:FindFirstChild(aimPartName) or char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
+	if State.AimPartName == "Head" then
+		return char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
+	else
+		return char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Head")
+	end
 end
 
-local function getTarget()
-	local cam = getCam()
-	local myChar = lp.Character
-	local myRoot = myChar and (myChar:FindFirstChild("HumanoidRootPart") or myChar:FindFirstChild("Head"))
-	if not cam or not myRoot then return nil end
+local function isValidTarget(player)
+	if not player or player == LocalPlayer then return false end
+	local char = player.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	local aimPart = getAimPart(char)
+	local myHRP = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
 
-	local center = Vector2.new(cam.ViewportSize.X * 0.5, cam.ViewportSize.Y * 0.5)
-	local best, bestDist = nil, math.huge
+	if not char or not hum or hum.Health <= 0 or not aimPart or not myHRP then
+		return false
+	end
 
-	for _, plr in ipairs(Players:GetPlayers()) do
-		if plr ~= lp and plr.Character then
-			local hum = plr.Character:FindFirstChildOfClass("Humanoid")
-			local part = getPart(plr.Character)
-			if hum and hum.Health > 0 and part then
-				local worldDist = (part.Position - myRoot.Position).Magnitude
-				if worldDist <= maxDist then
-					local sp, onScreen = cam:WorldToViewportPoint(part.Position)
-					if onScreen and sp.Z > 0 then
-						local d = (Vector2.new(sp.X, sp.Y) - center).Magnitude
-						if d < bestDist then
-							bestDist = d
-							best = part
-						end
-					end
+	local dist = (aimPart.Position - myHRP.Position).Magnitude
+	return dist <= State.MaxDistance
+end
+
+local function findBestTarget()
+	local cam = workspace.CurrentCamera
+	if not cam then return nil end
+
+	local viewportCenter = Vector2.new(cam.ViewportSize.X * 0.5, cam.ViewportSize.Y * 0.5)
+	local bestPlayer = nil
+	local bestScore = math.huge
+
+	for _, p in ipairs(Players:GetPlayers()) do
+		if isValidTarget(p) then
+			local aimPart = getAimPart(p.Character)
+			local screenPos, onScreen = cam:WorldToViewportPoint(aimPart.Position)
+			if onScreen and screenPos.Z > 0 then
+				local centerDist = (Vector2.new(screenPos.X, screenPos.Y) - viewportCenter).Magnitude
+				if centerDist < bestScore then
+					bestScore = centerDist
+					bestPlayer = p
 				end
 			end
 		end
 	end
-	return best
+
+	return bestPlayer
 end
 
-local gui = Instance.new("ScreenGui")
-gui.Name = "SileLockLite"
-gui.ResetOnSpawn = false
-gui.IgnoreGuiInset = true
-gui.Parent = lp:WaitForChild("PlayerGui")
+local function setLockEnabled(enabled)
+	if not State.Unlocked then return end
+	State.LockEnabled = enabled
 
--- Khung mật khẩu
-local authFrame = Instance.new("Frame")
-authFrame.Size = UDim2.new(0, 300, 0, 170)
-authFrame.Position = UDim2.new(0.5, -150, 0.5, -85)
-authFrame.BackgroundColor3 = Color3.fromRGB(28, 31, 40)
-authFrame.Parent = gui
-Instance.new("UICorner", authFrame).CornerRadius = UDim.new(0, 14)
+	if enabled then
+		ToggleBtn.Text = "★ LOCK-ON: ON [NHẤN E]"
+		TweenService:Create(ToggleBtn, TweenInfo.new(0.14), {
+			BackgroundColor3 = Color3.fromRGB(115, 25, 45),
+			BackgroundTransparency = 0.12
+		}):Play()
+		TweenService:Create(toggleStroke, TweenInfo.new(0.14), {
+			Color = Color3.fromRGB(255, 70, 100),
+			Thickness = 2.2
+		}):Play()
 
-local authStroke = Instance.new("UIStroke", authFrame)
-authStroke.Color = Color3.fromRGB(255, 65, 95)
-authStroke.Thickness = 2
+		State.CurrentTarget = findBestTarget()
 
-local passBox = Instance.new("TextBox")
-passBox.Size = UDim2.new(1, -28, 0, 38)
-passBox.Position = UDim2.new(0, 14, 0, 28)
-passBox.PlaceholderText = "Nhap mat khau..."
-passBox.Text = ""
-passBox.ClearTextOnFocus = false
-passBox.BackgroundColor3 = Color3.fromRGB(45, 49, 62)
-passBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-passBox.Parent = authFrame
-Instance.new("UICorner", passBox).CornerRadius = UDim.new(0, 8)
+		if State.LockConn then State.LockConn:Disconnect() end
+		State.LockConn = RunService.RenderStepped:Connect(function()
+			if not State.Unlocked or not State.LockEnabled then return end
+			local cam = workspace.CurrentCamera
+			if not cam then return end
 
-local unlockBtn = Instance.new("TextButton")
-unlockBtn.Size = UDim2.new(1, -28, 0, 38)
-unlockBtn.Position = UDim2.new(0, 14, 0, 80)
-unlockBtn.Text = "MO KHOA"
-unlockBtn.BackgroundColor3 = Color3.fromRGB(220, 45, 75)
-unlockBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-unlockBtn.Parent = authFrame
-Instance.new("UICorner", unlockBtn).CornerRadius = UDim.new(0, 8)
+			if not isValidTarget(State.CurrentTarget) then
+				State.CurrentTarget = findBestTarget()
+			end
 
-local msgLbl = Instance.new("TextLabel")
-msgLbl.Size = UDim2.new(1, -28, 0, 24)
-msgLbl.Position = UDim2.new(0, 14, 0, 128)
-msgLbl.BackgroundTransparency = 1
-msgLbl.Text = ""
-msgLbl.TextColor3 = Color3.fromRGB(255, 110, 130)
-msgLbl.Parent = authFrame
+			local target = State.CurrentTarget
+			local aimPart = target and getAimPart(target.Character)
+			if target and aimPart then
+				local camPos = cam.CFrame.Position
+				local desiredCF = CFrame.lookAt(camPos, aimPart.Position)
+				cam.CFrame = cam.CFrame:Lerp(desiredCF, State.Smoothness)
 
--- Bảng điều khiển chính
-local panel = Instance.new("Frame")
-panel.Size = UDim2.new(0, 250, 0, 150)
-panel.Position = UDim2.new(0.5, -125, 0.5, -75)
-panel.BackgroundColor3 = Color3.fromRGB(28, 31, 40)
-panel.Active = true
-panel.Draggable = true
-panel.Visible = false
-panel.Parent = gui
-Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 14)
+				local screenPos, onScreen = cam:WorldToViewportPoint(aimPart.Position)
+				if onScreen and screenPos.Z > 0 then
+					TargetReticle.Visible = true
+					TargetReticle.Position = UDim2.new(0, screenPos.X, 0, screenPos.Y)
+					local hum = target.Character and target.Character:FindFirstChildOfClass("Humanoid")
+					local hp = hum and math.floor(hum.Health) or 0
+					TargetTag.Text = string.format("%s | HP: %d", target.DisplayName, hp)
+				else
+					TargetReticle.Visible = false
+				end
 
-local pStroke = Instance.new("UIStroke", panel)
-pStroke.Color = Color3.fromRGB(255, 65, 95)
-pStroke.Thickness = 2
+				StatusLbl.Text = "Đang khóa: " .. target.DisplayName
+			else
+				TargetReticle.Visible = false
+				StatusLbl.Text = "Không có mục tiêu trong tầm"
+			end
+		end)
+	else
+		State.CurrentTarget = nil
+		TargetReticle.Visible = false
+		ToggleBtn.Text = "LOCK-ON: OFF [NHẤN E]"
+		StatusLbl.Text = "Nhấn E để bật / tắt khóa mục tiêu"
 
-local statusBtn = Instance.new("TextButton")
-statusBtn.Size = UDim2.new(1, -24, 0, 40)
-statusBtn.Position = UDim2.new(0, 12, 0, 16)
-statusBtn.Text = "LOCK: OFF [PHIM E]"
-statusBtn.BackgroundColor3 = Color3.fromRGB(45, 49, 62)
-statusBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-statusBtn.Parent = panel
-Instance.new("UICorner", statusBtn).CornerRadius = UDim.new(0, 8)
+		if State.LockConn then
+			State.LockConn:Disconnect()
+			State.LockConn = nil
+		end
 
-local partBtn = Instance.new("TextButton")
-partBtn.Size = UDim2.new(1, -24, 0, 34)
-partBtn.Position = UDim2.new(0, 12, 0, 66)
-partBtn.Text = "AIM: HEAD"
-partBtn.BackgroundColor3 = Color3.fromRGB(45, 49, 62)
-partBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-partBtn.Parent = panel
-Instance.new("UICorner", partBtn).CornerRadius = UDim.new(0, 8)
-
-local infoLbl = Instance.new("TextLabel")
-infoLbl.Size = UDim2.new(1, -24, 0, 30)
-infoLbl.Position = UDim2.new(0, 12, 0, 108)
-infoLbl.BackgroundTransparency = 1
-infoLbl.Text = "E: Bat/Tat | Ctrl / 2 Cham: An/Hien"
-infoLbl.TextColor3 = Color3.fromRGB(200, 205, 220)
-infoLbl.TextSize = 11
-infoLbl.Parent = panel
-
-local function setLock(state)
-	if not unlocked then return end
-	locking = state
-	statusBtn.Text = locking and "LOCK: ON [PHIM E]" or "LOCK: OFF [PHIM E]"
-	statusBtn.BackgroundColor3 = locking and Color3.fromRGB(220, 45, 75) or Color3.fromRGB(45, 49, 62)
-
-	if conn then
-		conn:Disconnect()
-		conn = nil
+		TweenService:Create(ToggleBtn, TweenInfo.new(0.14), {
+			BackgroundColor3 = Color3.fromRGB(45, 48, 60),
+			BackgroundTransparency = 0.25
+		}):Play()
+		TweenService:Create(toggleStroke, TweenInfo.new(0.14), {
+			Color = Color3.fromRGB(255, 255, 255),
+			Thickness = 1.8
+		}):Play()
 	end
+end
 
-	if locking then
-		conn = RunService.RenderStepped:Connect(function()
-			if not locking then return end
-			local cam = getCam()
-			local part = getTarget()
-			if cam and part then
-				local targetCF = CFrame.lookAt(cam.CFrame.Position, part.Position)
-				cam.CFrame = cam.CFrame:Lerp(targetCF, 0.35)
+--------------------------------------------------------------------------------
+-- XÁC THỰC MẬT KHẨU
+--------------------------------------------------------------------------------
+local function shakeAuthCard()
+	local basePos = AuthCard.Position
+	for i = 1, 4 do
+		local offsetX = (i % 2 == 0) and -8 or 8
+		AuthCard.Position = basePos + UDim2.new(0, offsetX, 0, 0)
+		task.wait(0.04)
+	end
+	AuthCard.Position = basePos
+end
+
+local function attemptUnlock()
+	local entered = string.gsub(PassBox.Text, "^%s*(.-)%s*$", "%1")
+	if entered == CORRECT_PASS then
+		State.Unlocked = true
+		AuthStatus.TextColor3 = Color3.fromRGB(120, 255, 165)
+		AuthStatus.Text = "Mật khẩu chính xác!"
+		task.wait(0.2)
+		LockBackdrop.Visible = false
+		Panel.Visible = true
+	else
+		AuthStatus.TextColor3 = Color3.fromRGB(255, 85, 110)
+		AuthStatus.Text = "Sai mật khẩu, thử lại nhé!"
+		TweenService:Create(authStroke, TweenInfo.new(0.15), {Color = Color3.fromRGB(255, 40, 70)}):Play()
+		task.spawn(shakeAuthCard)
+		task.delay(0.5, function()
+			if authStroke then
+				TweenService:Create(authStroke, TweenInfo.new(0.2), {Color = Color3.fromRGB(255, 255, 255)}):Play()
 			end
 		end)
 	end
 end
 
-local function checkPass()
-	local txt = string.gsub(passBox.Text, "^%s*(.-)%s*$", "%1")
-	if txt == PASS then
-		unlocked = true
-		authFrame.Visible = false
-		panel.Visible = true
-	else
-		msgLbl.Text = "Sai mat khau!"
+UnlockBtn.MouseButton1Click:Connect(attemptUnlock)
+PassBox.FocusLost:Connect(function(enterPressed)
+	if enterPressed then
+		attemptUnlock()
 	end
-end
-
-unlockBtn.MouseButton1Click:Connect(checkPass)
-passBox.FocusLost:Connect(function(enter)
-	if enter then checkPass() end
 end)
 
-statusBtn.MouseButton1Click:Connect(function()
-	setLock(not locking)
+ToggleBtn.MouseButton1Click:Connect(function()
+	setLockEnabled(not State.LockEnabled)
 end)
 
-partBtn.MouseButton1Click:Connect(function()
-	aimPartName = (aimPartName == "Head") and "HumanoidRootPart" or "Head"
-	partBtn.Text = (aimPartName == "Head") and "AIM: HEAD" or "AIM: BODY"
+PartBtn.MouseButton1Click:Connect(function()
+	if not State.Unlocked then return end
+	if State.AimPartName == "Head" then
+		State.AimPartName = "HumanoidRootPart"
+		PartBtn.Text = "MỤC TIÊU: BODY"
+	else
+		State.AimPartName = "Head"
+		PartBtn.Text = "MỤC TIÊU: HEAD"
+	end
 end)
 
-UserInputService.InputBegan:Connect(function(input, gp)
-	if not unlocked then return end
+DistBox.FocusLost:Connect(function()
+	local num = tonumber(string.match(DistBox.Text, "%d+"))
+	if num then
+		State.MaxDistance = math.clamp(num, 20, 1500)
+	end
+	DistBox.Text = "Tầm: " .. tostring(State.MaxDistance)
+end)
 
-	if input.UserInputType == Enum.UserInputType.Touch and not gp then
+--------------------------------------------------------------------------------
+-- PHÍM TẮT PC (E & CTRL) + CHẠM 2 LẦN TRÊN ĐIỆN THOẠI
+--------------------------------------------------------------------------------
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if not State.Unlocked then return end
+
+	-- Chạm 2 lần liên tiếp trên điện thoại (Touch) để ẩn/hiện menu
+	if input.UserInputType == Enum.UserInputType.Touch and not gameProcessed then
 		local now = os.clock()
-		local pos = Vector2.new(input.Position.X, input.Position.Y)
-		if (now - lastTap) <= 0.35 and (pos - lastPos).Magnitude <= 85 then
-			panel.Visible = not panel.Visible
-			lastTap = 0
+		local tapPos = Vector2.new(input.Position.X, input.Position.Y)
+		if (now - State.LastTapTime) <= 0.35 and (tapPos - State.LastTapPos).Magnitude <= 85 then
+			Panel.Visible = not Panel.Visible
+			State.LastTapTime = 0
 		else
-			lastTap = now
-			lastPos = pos
+			State.LastTapTime = now
+			State.LastTapPos = tapPos
 		end
 		return
 	end
 
-	if UserInputService:GetFocusedTextBox() then return end
+	if gameProcessed then return end
 
 	if input.KeyCode == Enum.KeyCode.E then
-		setLock(not locking)
+		setLockEnabled(not State.LockEnabled)
 	elseif input.KeyCode == Enum.KeyCode.LeftControl or input.KeyCode == Enum.KeyCode.RightControl then
-		panel.Visible = not panel.Visible
+		Panel.Visible = not Panel.Visible
 	end
 end)
