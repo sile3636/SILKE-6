@@ -1,0 +1,215 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local lp = Players.LocalPlayer
+local PASS = "SILE_095684f"
+local unlocked = false
+local locking = false
+local maxDist = 250
+local aimPartName = "Head"
+local conn = nil
+local lastTap = 0
+local lastPos = Vector2.zero
+
+local function getCam()
+	return workspace.CurrentCamera
+end
+
+local function getPart(char)
+	if not char then return nil end
+	return char:FindFirstChild(aimPartName) or char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
+end
+
+local function getTarget()
+	local cam = getCam()
+	local myChar = lp.Character
+	local myRoot = myChar and (myChar:FindFirstChild("HumanoidRootPart") or myChar:FindFirstChild("Head"))
+	if not cam or not myRoot then return nil end
+
+	local center = Vector2.new(cam.ViewportSize.X * 0.5, cam.ViewportSize.Y * 0.5)
+	local best, bestDist = nil, math.huge
+
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= lp and plr.Character then
+			local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+			local part = getPart(plr.Character)
+			if hum and hum.Health > 0 and part then
+				local worldDist = (part.Position - myRoot.Position).Magnitude
+				if worldDist <= maxDist then
+					local sp, onScreen = cam:WorldToViewportPoint(part.Position)
+					if onScreen and sp.Z > 0 then
+						local d = (Vector2.new(sp.X, sp.Y) - center).Magnitude
+						if d < bestDist then
+							bestDist = d
+							best = part
+						end
+					end
+				end
+			end
+		end
+	end
+	return best
+end
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "SileLockLite"
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.Parent = lp:WaitForChild("PlayerGui")
+
+-- Khung mật khẩu
+local authFrame = Instance.new("Frame")
+authFrame.Size = UDim2.new(0, 300, 0, 170)
+authFrame.Position = UDim2.new(0.5, -150, 0.5, -85)
+authFrame.BackgroundColor3 = Color3.fromRGB(28, 31, 40)
+authFrame.Parent = gui
+Instance.new("UICorner", authFrame).CornerRadius = UDim.new(0, 14)
+
+local authStroke = Instance.new("UIStroke", authFrame)
+authStroke.Color = Color3.fromRGB(255, 65, 95)
+authStroke.Thickness = 2
+
+local passBox = Instance.new("TextBox")
+passBox.Size = UDim2.new(1, -28, 0, 38)
+passBox.Position = UDim2.new(0, 14, 0, 28)
+passBox.PlaceholderText = "Nhap mat khau..."
+passBox.Text = ""
+passBox.ClearTextOnFocus = false
+passBox.BackgroundColor3 = Color3.fromRGB(45, 49, 62)
+passBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+passBox.Parent = authFrame
+Instance.new("UICorner", passBox).CornerRadius = UDim.new(0, 8)
+
+local unlockBtn = Instance.new("TextButton")
+unlockBtn.Size = UDim2.new(1, -28, 0, 38)
+unlockBtn.Position = UDim2.new(0, 14, 0, 80)
+unlockBtn.Text = "MO KHOA"
+unlockBtn.BackgroundColor3 = Color3.fromRGB(220, 45, 75)
+unlockBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+unlockBtn.Parent = authFrame
+Instance.new("UICorner", unlockBtn).CornerRadius = UDim.new(0, 8)
+
+local msgLbl = Instance.new("TextLabel")
+msgLbl.Size = UDim2.new(1, -28, 0, 24)
+msgLbl.Position = UDim2.new(0, 14, 0, 128)
+msgLbl.BackgroundTransparency = 1
+msgLbl.Text = ""
+msgLbl.TextColor3 = Color3.fromRGB(255, 110, 130)
+msgLbl.Parent = authFrame
+
+-- Bảng điều khiển chính
+local panel = Instance.new("Frame")
+panel.Size = UDim2.new(0, 250, 0, 150)
+panel.Position = UDim2.new(0.5, -125, 0.5, -75)
+panel.BackgroundColor3 = Color3.fromRGB(28, 31, 40)
+panel.Active = true
+panel.Draggable = true
+panel.Visible = false
+panel.Parent = gui
+Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 14)
+
+local pStroke = Instance.new("UIStroke", panel)
+pStroke.Color = Color3.fromRGB(255, 65, 95)
+pStroke.Thickness = 2
+
+local statusBtn = Instance.new("TextButton")
+statusBtn.Size = UDim2.new(1, -24, 0, 40)
+statusBtn.Position = UDim2.new(0, 12, 0, 16)
+statusBtn.Text = "LOCK: OFF [PHIM E]"
+statusBtn.BackgroundColor3 = Color3.fromRGB(45, 49, 62)
+statusBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+statusBtn.Parent = panel
+Instance.new("UICorner", statusBtn).CornerRadius = UDim.new(0, 8)
+
+local partBtn = Instance.new("TextButton")
+partBtn.Size = UDim2.new(1, -24, 0, 34)
+partBtn.Position = UDim2.new(0, 12, 0, 66)
+partBtn.Text = "AIM: HEAD"
+partBtn.BackgroundColor3 = Color3.fromRGB(45, 49, 62)
+partBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+partBtn.Parent = panel
+Instance.new("UICorner", partBtn).CornerRadius = UDim.new(0, 8)
+
+local infoLbl = Instance.new("TextLabel")
+infoLbl.Size = UDim2.new(1, -24, 0, 30)
+infoLbl.Position = UDim2.new(0, 12, 0, 108)
+infoLbl.BackgroundTransparency = 1
+infoLbl.Text = "E: Bat/Tat | Ctrl / 2 Cham: An/Hien"
+infoLbl.TextColor3 = Color3.fromRGB(200, 205, 220)
+infoLbl.TextSize = 11
+infoLbl.Parent = panel
+
+local function setLock(state)
+	if not unlocked then return end
+	locking = state
+	statusBtn.Text = locking and "LOCK: ON [PHIM E]" or "LOCK: OFF [PHIM E]"
+	statusBtn.BackgroundColor3 = locking and Color3.fromRGB(220, 45, 75) or Color3.fromRGB(45, 49, 62)
+
+	if conn then
+		conn:Disconnect()
+		conn = nil
+	end
+
+	if locking then
+		conn = RunService.RenderStepped:Connect(function()
+			if not locking then return end
+			local cam = getCam()
+			local part = getTarget()
+			if cam and part then
+				local targetCF = CFrame.lookAt(cam.CFrame.Position, part.Position)
+				cam.CFrame = cam.CFrame:Lerp(targetCF, 0.35)
+			end
+		end)
+	end
+end
+
+local function checkPass()
+	local txt = string.gsub(passBox.Text, "^%s*(.-)%s*$", "%1")
+	if txt == PASS then
+		unlocked = true
+		authFrame.Visible = false
+		panel.Visible = true
+	else
+		msgLbl.Text = "Sai mat khau!"
+	end
+end
+
+unlockBtn.MouseButton1Click:Connect(checkPass)
+passBox.FocusLost:Connect(function(enter)
+	if enter then checkPass() end
+end)
+
+statusBtn.MouseButton1Click:Connect(function()
+	setLock(not locking)
+end)
+
+partBtn.MouseButton1Click:Connect(function()
+	aimPartName = (aimPartName == "Head") and "HumanoidRootPart" or "Head"
+	partBtn.Text = (aimPartName == "Head") and "AIM: HEAD" or "AIM: BODY"
+end)
+
+UserInputService.InputBegan:Connect(function(input, gp)
+	if not unlocked then return end
+
+	if input.UserInputType == Enum.UserInputType.Touch and not gp then
+		local now = os.clock()
+		local pos = Vector2.new(input.Position.X, input.Position.Y)
+		if (now - lastTap) <= 0.35 and (pos - lastPos).Magnitude <= 85 then
+			panel.Visible = not panel.Visible
+			lastTap = 0
+		else
+			lastTap = now
+			lastPos = pos
+		end
+		return
+	end
+
+	if UserInputService:GetFocusedTextBox() then return end
+
+	if input.KeyCode == Enum.KeyCode.E then
+		setLock(not locking)
+	elseif input.KeyCode == Enum.KeyCode.LeftControl or input.KeyCode == Enum.KeyCode.RightControl then
+		panel.Visible = not panel.Visible
+	end
+end)
